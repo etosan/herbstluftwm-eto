@@ -36,6 +36,7 @@ typedef struct HSMonitor {
     bool        dirty;
     bool        lock_frames;
     bool        lock_tag;
+    bool        skip_cycle;     // skip monitor when cycling
     struct {
         // last saved mouse position
         int x;
