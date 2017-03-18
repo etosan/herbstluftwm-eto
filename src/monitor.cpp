@@ -403,16 +403,26 @@ int string_to_monitor_index(char* string) {
 }
 
 int monitor_index_in_direction(HSMonitor* m, enum HSDirection dir) {
-    int cnt = monitor_count();
-    RectangleIdx* rects = g_new0(RectangleIdx, cnt);
+    if (m->skip_cycle == true) return -1;
+    int acnt = monitor_count();
+    int rcnt = 0;
+    // we consider only monitors which don't have skip_cycle attribute set
+    FOR (i,0,acnt) {
+        HSMonitor* am = monitor_with_index(i);
+        if (am->skip_cycle == false) rcnt++;
+    }
+    if (rcnt == 0) return -1;
+    RectangleIdx* rects = g_new0(RectangleIdx, rcnt);
     int relidx = -1;
-    FOR (i,0,cnt) {
-        rects[i].idx = i;
-        rects[i].r = monitor_with_index(i)->rect;
-        if (monitor_with_index(i) == m) relidx = i;
+    FOR (i,0,rcnt) {
+        if (monitor_with_index(i)->skip_cycle == false) {
+            rects[i].idx = i;
+            rects[i].r = monitor_with_index(i)->rect;
+            if (monitor_with_index(i) == m) relidx = i;
+        }
     }
     HSAssert(relidx >= 0);
-    int result = find_rectangle_in_direction(rects, cnt, relidx, dir);
+    int result = find_rectangle_in_direction(rects, rcnt, relidx, dir);
     g_free(rects);
     return result;
 }
@@ -430,6 +440,10 @@ static int monitor_attr_index(void* data) {
 static void monitor_attr_tag(void* data, GString* output) {
     HSMonitor* m = (HSMonitor*) data;
     g_string_append(output, m->tag->display_name->str);
+}
+
+static GString* monitor_attr_skip_cycle(HSAttribute* attr) {
+    return NULL;
 }
 
 static void monitor_foreach(void (*action)(HSMonitor*)) {
@@ -463,6 +477,7 @@ HSMonitor* add_monitor(Rectangle rect, HSTag* tag, char* name) {
     m->tag_previous = tag;
     m->name = (name ? g_string_new(name) : NULL);
     m->display_name = g_string_new(name ? name : "");
+    m->skip_cycle = false;
     m->mouse.x = 0;
     m->mouse.y = 0;
     m->dirty = true;
@@ -472,10 +487,11 @@ HSMonitor* add_monitor(Rectangle rect, HSTag* tag, char* name) {
 
     m->object.data = m;
     HSAttribute attributes[] = {
-        ATTRIBUTE("name",     m->display_name,ATTR_READ_ONLY  ),
-        ATTRIBUTE("index",    monitor_attr_index,ATTR_READ_ONLY  ),
-        ATTRIBUTE("tag",      monitor_attr_tag,ATTR_READ_ONLY  ),
-        ATTRIBUTE("lock_tag", m->lock_tag,    ATTR_READ_ONLY  ),
+        ATTRIBUTE("name",       m->display_name,ATTR_READ_ONLY  ),
+        ATTRIBUTE("index",      monitor_attr_index,ATTR_READ_ONLY  ),
+        ATTRIBUTE("skip_cycle", m->skip_cycle, monitor_attr_skip_cycle  ),
+        ATTRIBUTE("tag",        monitor_attr_tag,ATTR_READ_ONLY  ),
+        ATTRIBUTE("lock_tag",   m->lock_tag,    ATTR_READ_ONLY  ),
         ATTRIBUTE_LAST,
     };
     hsobject_set_attributes(&m->object, attributes);
@@ -957,11 +973,26 @@ int monitor_cycle_command(int argc, char** argv) {
     if (argc >= 2) {
         delta = atoi(argv[1]);
     }
+    HSMonitor* monitor = NULL;
     int new_selection = g_cur_monitor + delta;
-    // fix range of index
-    new_selection %= count;
-    new_selection += count;
-    new_selection %= count;
+    do  {
+        // fix range of index
+        new_selection %= count;
+        new_selection += count;
+        new_selection %= count;
+
+        monitor = monitor_with_index(new_selection);
+
+        if (monitor->skip_cycle == false) {
+            break;
+        }
+        if (delta < 0) {
+            new_selection--;
+        } else {
+            new_selection++;
+        }
+    } while (monitor->skip_cycle == true);
+
     // really change selection
     monitor_focus_by_index(new_selection);
     return 0;
